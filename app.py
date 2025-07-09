@@ -1,4 +1,4 @@
-# app_course_tabs.py  — Add • Edit • Guideline  (streamlined)
+# app_course_tabs.py  — Add • Edit • Guideline (robust, buffered cursors)
 import streamlit as st
 import mysql.connector
 import json
@@ -19,7 +19,7 @@ def get_conn():
 
 conn = get_conn()
 
-# ───────────────────── 2. Ensure table ─────────────────────────
+# ───────────────────── 2. Ensure table (buffered cursor) ───────
 DDL = """
 CREATE TABLE IF NOT EXISTS course_tabs (
   tab_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,16 +41,16 @@ CREATE TABLE IF NOT EXISTS course_tabs (
   prompt TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
-with conn.cursor() as c:
-    c.execute(DDL)
+with conn.cursor(buffered=True) as cur:
+    cur.execute(DDL)
 
 # ───────────────────── 3. Helpers ──────────────────────────────
 def none_if_blank(v: str | None) -> Any:
     return None if (v is None or not v.strip()) else v
 
 def insert_tab(row: Tuple):
-    with conn.cursor() as c:
-        c.execute(
+    with conn.cursor(buffered=True) as cur:
+        cur.execute(
             """
             INSERT INTO course_tabs
             (module, tab_number, title, subtitle, video_url, video_upload,
@@ -63,8 +63,8 @@ def insert_tab(row: Tuple):
         )
 
 def update_tab(tab_id: int, row: Tuple):
-    with conn.cursor() as c:
-        c.execute(
+    with conn.cursor(buffered=True) as cur:
+        cur.execute(
             """
             UPDATE course_tabs SET
               module=%s, tab_number=%s, title=%s, subtitle=%s, video_url=%s,
@@ -78,9 +78,9 @@ def update_tab(tab_id: int, row: Tuple):
         )
 
 def fetch_tabs() -> List[Dict]:
-    with conn.cursor(dictionary=True) as c:
-        c.execute("SELECT * FROM course_tabs ORDER BY module, display_order, tab_number")
-        return c.fetchall()
+    with conn.cursor(buffered=True, dictionary=True) as cur:
+        cur.execute("SELECT * FROM course_tabs ORDER BY module, display_order, tab_number")
+        return cur.fetchall()
 
 # ───────────────────── 4. Page selector ────────────────────────
 page = st.sidebar.radio("Page", ("Add", "Edit", "Guideline"))
