@@ -1,11 +1,12 @@
-# app_course_data.py  — Add • Edit • Guideline • Bulk Upload (tabs + tasks)
+# app_course_manager.py  — unified UI for course_tabs & course_tasks
 import streamlit as st
 import mysql.connector
 import pandas as pd
 import json
+import datetime
 from typing import Any, Dict, List, Tuple
 
-# ───────────────── 1. MySQL connection ────────────────
+# ───────────────────── 1. MySQL connection ─────────────────────
 @st.cache_resource
 def get_conn():
     cfg = st.secrets["mysql"]
@@ -20,7 +21,7 @@ def get_conn():
 
 conn = get_conn()
 
-# ───────────────── 2. Ensure both tables ──────────────
+# ───────────────────── 2. Ensure tables ─────────────────────────
 with conn.cursor(buffered=True) as cur:
     cur.execute(
         """
@@ -63,33 +64,47 @@ with conn.cursor(buffered=True) as cur:
         """
     )
 
-# ───────────────── 3. Column configs ─────────────────
-COLS_TABS = [
-    "module","tab_number","title","subtitle","video_url","video_upload",
-    "main_content","markdown_sections","code_example","external_links",
-    "table_data","reference_links","custom_module","display_order",
-    "extra_html","prompt"
-]
+# ───────────────────── 3. Metadata per table ────────────────────
+TABLES: Dict[str, Dict] = {
+    "course_tabs": {
+        "pk": "tab_id",
+        "cols": [
+            "module","tab_number","title","subtitle","video_url","video_upload",
+            "main_content","markdown_sections","code_example","external_links",
+            "table_data","reference_links","custom_module","display_order",
+            "extra_html","prompt"
+        ],
+        "required": ["module","tab_number","title"],
+    },
+    "course_tasks": {
+        "pk": "task_id",
+        "cols": [
+            "tab_id","task_type","question","options_json","correct_answer",
+            "assignment_details","solution","points","due_date"
+        ],
+        "required": ["tab_id","task_type","question"],
+    },
+}
 
-COLS_TASKS = [
-    "tab_id","task_type","question","options_json","correct_answer",
-    "assignment_details","solution","points","due_date"
-]
-
+# ───────────────────── 4. Utility helpers ───────────────────────
 def none_if_blank(v: Any) -> Any:
-    return None if (v is None or str(v).strip() == "") else v
+    if v is None: return None
+    s = str(v).strip()
+    return None if s == "" else v
 
-# ───────────────── 4. Generic DB helpers ─────────────
-def insert_row(table: str, cols: List[str], values: Tuple):
+def insert_row(table: str, values: Tuple):
     with conn.cursor(buffered=True) as cur:
+        cols = TABLES[table]["cols"]
         cur.execute(
-            f"INSERT INTO {table} ({','.join(cols)}) VALUES ({','.join(['%s']*len(cols))})",
+            f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(['%s']*len(cols))})",
             values,
         )
 
-def update_row(table: str, pk_col: str, pk_val: int, cols: List[str], values: Tuple):
-    assignments = ",".join(f"{c}=%s" for c in cols)
+def update_row(table: str, pk_val: int, values: Tuple):
     with conn.cursor(buffered=True) as cur:
+        cols = TABLES[table]["cols"]
+        assignments = ", ".join(f"{c}=%s" for c in cols)
+        pk_col = TABLES[table]["pk"]
         cur.execute(
             f"UPDATE {table} SET {assignments} WHERE {pk_col}=%s",
             values + (pk_val,),
@@ -100,49 +115,149 @@ def fetch_all(table: str) -> List[Dict]:
         cur.execute(f"SELECT * FROM {table}")
         return cur.fetchall()
 
-# ───────────────── 5. Bulk Upload page ───────────────
-def bulk_page():
-    st.title("Bulk CSV Upload")
+# ───────────────────── 5. Page & table selector ─────────────────
+table_choice = st.sidebar.selectbox("Choose table", ("course_tabs", "course_tasks"))
+page = st.sidebar.radio("Page", ("Add", "Edit", "Bulk Upload", "Guideline"))
 
-    table_choice = st.selectbox("Target table", ("course_tabs", "course_tasks"))
-    cols = COLS_TABS if table_choice == "course_tabs" else COLS_TASKS
-    pk   = "tab_id" if table_choice == "course_tabs" else "task_id"
+META = TABLES[table_choice]
+PK   = META["pk"]
+COLS = META["cols"]
+REQ  = set(META["required"])
 
-    uploaded = st.file_uploader("Upload CSV", type="csv")
-    if not uploaded:
-        st.info("Awaiting CSV file.")
+# ───────────────────── 6. Add page ─────────────────────────────
+def add_page():
+    st.title(f"Add → {table_choice}")
+
+    with st.form("add_form", clear_on_submit=True):
+        inputs: Dict[str, Any] = {}
+        for col in COLS:
+            # decide widget type
+            if col in ("main_content","markdown_sections","code_example",
+                       "external_links","table_data","reference_links",
+                       "assignment_details","solution","extra_html","prompt","question","options_json"):
+                inputs[col] = st.text_area(col, height=120 if col=="main_content" else 90)
+            elif col == "task_type":
+                inputs[col] = st.selectbox(col, ("quiz","assignment"))
+            elif col == "points":
+                inputs[col] = st.number_input(col, min_value=1, value=1)
+            elif col == "display_order":
+                inputs[col] = st.number_input(col, min_value=1, value=1)
+            elif col == "due_date":
+                inputs[col] = st.date_input(col, value=datetime.date.today())
+            else:
+                inputs[col] = st.text_input(col)
+
+        if st.form_submit_button("Save"):
+            if not all(inputs[c] for c in REQ):
+                st.error(f"Required fields: {', '.join(REQ)}")
+            else:
+                vals = tuple(none_if_blank(inputs[c]) for c in COLS)
+                insert_row(table_choice, vals)
+                st.success("Row inserted.")
+
+    st.divider()
+    st.subheader("Preview")
+    st.dataframe(fetch_all(table_choice), use_container_width=True)
+
+# ───────────────────── 7. Edit page ────────────────────────────
+def edit_page():
+    st.title(f"Edit → {table_choice}")
+
+    rows = fetch_all(table_choice)
+    if not rows:
+        st.info("No data.")
         return
 
-    df = pd.read_csv(uploaded)
+    label = lambda r: f"{table_choice[:-1]} {r[PK]}"
+    selected = st.selectbox("Select row", rows, format_func=label)
+    pk_val = selected[PK]
+
+    with st.form(f"edit_{pk_val}"):
+        inputs: Dict[str, Any] = {}
+        for col in COLS:
+            current = selected.get(col)
+            if col in ("main_content","markdown_sections","code_example",
+                       "external_links","table_data","reference_links",
+                       "assignment_details","solution","extra_html","prompt","question","options_json"):
+                inputs[col] = st.text_area(col, value=current or "", height=120 if col=="main_content" else 90)
+            elif col == "task_type":
+                inputs[col] = st.selectbox(col, ("quiz","assignment"), index=0 if current=="quiz" else 1)
+            elif col == "points":
+                inputs[col] = st.number_input(col, min_value=1, value=int(current or 1))
+            elif col == "display_order":
+                inputs[col] = st.number_input(col, min_value=1, value=int(current or 1))
+            elif col == "due_date":
+                date_val = current if isinstance(current, datetime.date) else datetime.date.today()
+                inputs[col] = st.date_input(col, value=date_val)
+            else:
+                inputs[col] = st.text_input(col, value=current or "")
+
+        if st.form_submit_button("Update"):
+            if not all(inputs[c] for c in REQ):
+                st.error(f"Required fields: {', '.join(REQ)}")
+            else:
+                vals = tuple(none_if_blank(inputs[c]) for c in COLS)
+                update_row(table_choice, pk_val, vals)
+                st.success("Row updated.")
+
+# ───────────────────── 8. Bulk Upload page ─────────────────────
+def bulk_page():
+    st.title(f"Bulk CSV → {table_choice}")
+
+    file = st.file_uploader("CSV file", type="csv")
+    if not file:
+        return
+
+    df = pd.read_csv(file)
     st.dataframe(df.head())
 
-    # add missing cols as blank
-    for c in cols:
-        if c not in df.columns:
-            df[c] = None
+    for col in COLS:
+        if col not in df.columns:
+            df[col] = None
 
-    mode = st.radio("Insert mode", ("Insert new", "Update if primary key present"))
+    mode = st.radio("Mode", ("Insert only", "Update if PK present"))
 
     if st.button("Import"):
         ins = upd = 0
         for _, r in df.iterrows():
-            vals = tuple(
-                none_if_blank(r.get(c)) if c not in ("display_order","points") else int(r.get(c) or 1)
-                for c in cols
-            )
-            pk_val = int(r[pk]) if pk in df.columns and pd.notna(r[pk]) else None
+            vals = []
+            for col in COLS:
+                val = r.get(col)
+                if col == "display_order" or col == "points":
+                    val = int(val) if pd.notna(val) else 1
+                vals.append(none_if_blank(val))
+            vals_t = tuple(vals)
+
+            pk_val = int(r[PK]) if (PK in df.columns and pd.notna(r[PK])) else None
             try:
-                if mode == "Update if primary key present" and pk_val:
-                    update_row(table_choice, pk, pk_val, cols, vals)
+                if mode == "Update if PK present" and pk_val:
+                    update_row(table_choice, pk_val, vals_t)
                     upd += 1
                 else:
-                    insert_row(table_choice, cols, vals)
+                    insert_row(table_choice, vals_t)
                     ins += 1
             except Exception as e:
                 st.error(f"Row {_} error: {e}")
         st.success(f"Inserted {ins}, Updated {upd}")
 
-# ───────────────── 6. Simple router (Bulk only shown here) ─────
-if __name__ == "__main__":
-    page = st.sidebar.radio("Page", ("Bulk Upload",))
+# ───────────────────── 9. Guideline page ───────────────────────
+def guideline_page():
+    st.title(f"Guideline → {table_choice}")
+
+    rows = fetch_all(table_choice)
+    if not rows:
+        st.info("No data.")
+        return
+
+    selected = st.selectbox("Row", rows, format_func=lambda r: f"{table_choice[:-1]} {r[PK]}")
+    st.code(json.dumps(selected, indent=2, default=str), language="json")
+
+# ───────────────────── 10. Router ──────────────────────────────
+if page == "Add":
+    add_page()
+elif page == "Edit":
+    edit_page()
+elif page == "Bulk Upload":
     bulk_page()
+else:
+    guideline_page()
