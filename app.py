@@ -1,6 +1,7 @@
-# app_course_tabs.py  — Add • Edit • Guideline (robust, buffered cursors)
+# app_course_tabs.py  — Add • Edit • Guideline • Bulk Upload
 import streamlit as st
 import mysql.connector
+import pandas as pd
 import json
 from typing import Any, Dict, List, Tuple
 
@@ -19,7 +20,7 @@ def get_conn():
 
 conn = get_conn()
 
-# ───────────────────── 2. Ensure table (buffered cursor) ───────
+# ───────────────────── 2. Ensure table ─────────────────────────
 DDL = """
 CREATE TABLE IF NOT EXISTS course_tabs (
   tab_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -45,83 +46,72 @@ with conn.cursor(buffered=True) as cur:
     cur.execute(DDL)
 
 # ───────────────────── 3. Helpers ──────────────────────────────
+COLS = [
+    "module", "tab_number", "title", "subtitle", "video_url", "video_upload",
+    "main_content", "markdown_sections", "code_example", "external_links",
+    "table_data", "reference_links", "custom_module", "display_order",
+    "extra_html", "prompt"
+]
+
 def none_if_blank(v: str | None) -> Any:
-    return None if (v is None or not v.strip()) else v
+    return None if (v is None or str(v).strip() == "") else v
 
 def insert_tab(row: Tuple):
     with conn.cursor(buffered=True) as cur:
         cur.execute(
-            """
-            INSERT INTO course_tabs
-            (module, tab_number, title, subtitle, video_url, video_upload,
-             main_content, markdown_sections, code_example, external_links,
-             table_data, reference_links, custom_module, display_order,
-             extra_html, prompt)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            f"""
+            INSERT INTO course_tabs ({', '.join(COLS)})
+            VALUES ({', '.join(['%s'] * len(COLS))})
             """,
             row,
         )
 
 def update_tab(tab_id: int, row: Tuple):
     with conn.cursor(buffered=True) as cur:
+        assignments = ", ".join(f"{col}=%s" for col in COLS)
         cur.execute(
-            """
-            UPDATE course_tabs SET
-              module=%s, tab_number=%s, title=%s, subtitle=%s, video_url=%s,
-              video_upload=%s, main_content=%s, markdown_sections=%s,
-              code_example=%s, external_links=%s, table_data=%s,
-              reference_links=%s, custom_module=%s, display_order=%s,
-              extra_html=%s, prompt=%s
-            WHERE tab_id=%s
-            """,
+            f"UPDATE course_tabs SET {assignments} WHERE tab_id=%s",
             row + (tab_id,),
         )
 
 def fetch_tabs() -> List[Dict]:
     with conn.cursor(buffered=True, dictionary=True) as cur:
-        cur.execute("SELECT * FROM course_tabs ORDER BY module, display_order, tab_number")
+        cur.execute(
+            "SELECT * FROM course_tabs ORDER BY module, display_order, tab_number"
+        )
         return cur.fetchall()
 
 # ───────────────────── 4. Page selector ────────────────────────
-page = st.sidebar.radio("Page", ("Add", "Edit", "Guideline"))
+page = st.sidebar.radio("Page", ("Add", "Edit", "Bulk Upload", "Guideline"))
 
 # ───────────────────── 5. Add page ─────────────────────────────
 def add_page():
     st.title("Add New Row")
 
     with st.form("add_row", clear_on_submit=True):
-        module         = st.text_input("**module**")
-        tab_number     = st.text_input("**tab_number**")
-        title          = st.text_input("**title**")
-        subtitle       = st.text_input("subtitle")
-        video_url      = st.text_input("video_url")
-        video_upload   = st.text_input("video_upload")
-        main_content   = st.text_area("main_content", height=120)
-        markdown_sections = st.text_area("markdown_sections (JSON)", height=80)
-        code_example   = st.text_area("code_example", height=100)
-        external_links = st.text_area("external_links (JSON)", height=80)
-        table_data     = st.text_area("table_data (JSON)", height=80)
-        reference_links= st.text_area("reference_links (JSON)", height=80)
-        custom_module  = st.text_input("custom_module")
-        display_order  = st.number_input("**display_order**", min_value=1, value=1)
-        extra_html     = st.text_area("extra_html", height=80)
-        prompt         = st.text_area("prompt", height=100)
+        inputs = {}
+        inputs["module"]            = st.text_input("**module**")
+        inputs["tab_number"]        = st.text_input("**tab_number**")
+        inputs["title"]             = st.text_input("**title**")
+        inputs["subtitle"]          = st.text_input("subtitle")
+        inputs["video_url"]         = st.text_input("video_url")
+        inputs["video_upload"]      = st.text_input("video_upload")
+        inputs["main_content"]      = st.text_area("main_content", height=120)
+        inputs["markdown_sections"] = st.text_area("markdown_sections (JSON)", height=80)
+        inputs["code_example"]      = st.text_area("code_example", height=100)
+        inputs["external_links"]    = st.text_area("external_links (JSON)", height=80)
+        inputs["table_data"]        = st.text_area("table_data (JSON)", height=80)
+        inputs["reference_links"]   = st.text_area("reference_links (JSON)", height=80)
+        inputs["custom_module"]     = st.text_input("custom_module")
+        inputs["display_order"]     = st.number_input("**display_order**", min_value=1, value=1)
+        inputs["extra_html"]        = st.text_area("extra_html", height=80)
+        inputs["prompt"]            = st.text_area("prompt", height=100)
 
         if st.form_submit_button("Save row"):
-            if not (module and tab_number and title):
+            if not (inputs["module"] and inputs["tab_number"] and inputs["title"]):
                 st.error("module, tab_number, and title are required.")
             else:
-                insert_tab(
-                    (
-                        module, tab_number, title, none_if_blank(subtitle),
-                        none_if_blank(video_url), none_if_blank(video_upload),
-                        none_if_blank(main_content), none_if_blank(markdown_sections),
-                        none_if_blank(code_example), none_if_blank(external_links),
-                        none_if_blank(table_data), none_if_blank(reference_links),
-                        none_if_blank(custom_module), int(display_order),
-                        none_if_blank(extra_html), none_if_blank(prompt),
-                    )
-                )
+                insert_tab(tuple(none_if_blank(inputs[c]) for c in COLS))
                 st.success("Row saved!")
 
     st.divider()
@@ -142,42 +132,70 @@ def edit_page():
     tab_id = selected["tab_id"]
 
     with st.form(f"edit_{tab_id}"):
-        module         = st.text_input("module",           value=selected["module"])
-        tab_number     = st.text_input("tab_number",       value=selected["tab_number"])
-        title          = st.text_input("title",            value=selected["title"])
-        subtitle       = st.text_input("subtitle",         value=selected.get("subtitle") or "")
-        video_url      = st.text_input("video_url",        value=selected.get("video_url") or "")
-        video_upload   = st.text_input("video_upload",     value=selected.get("video_upload") or "")
-        main_content   = st.text_area("main_content",      value=selected.get("main_content") or "", height=120)
-        markdown_sections = st.text_area("markdown_sections (JSON)", value=selected.get("markdown_sections") or "", height=80)
-        code_example   = st.text_area("code_example",      value=selected.get("code_example") or "", height=100)
-        external_links = st.text_area("external_links (JSON)", value=selected.get("external_links") or "", height=80)
-        table_data     = st.text_area("table_data (JSON)", value=selected.get("table_data") or "", height=80)
-        reference_links= st.text_area("reference_links (JSON)", value=selected.get("reference_links") or "", height=80)
-        custom_module  = st.text_input("custom_module",    value=selected.get("custom_module") or "")
-        display_order  = st.number_input("display_order",  min_value=1, value=int(selected["display_order"]))
-        extra_html     = st.text_area("extra_html",        value=selected.get("extra_html") or "", height=80)
-        prompt         = st.text_area("prompt",            value=selected.get("prompt") or "", height=100)
+        inputs = {}
+        for col in COLS:
+            if col in ("main_content", "markdown_sections", "code_example",
+                       "external_links", "table_data", "reference_links",
+                       "extra_html", "prompt"):
+                height = 120 if col == "main_content" else 100
+                height = 80 if col not in ("main_content", "code_example") else height
+                inputs[col] = st.text_area(col, value=selected.get(col) or "", height=height)
+            elif col == "display_order":
+                inputs[col] = st.number_input(col, min_value=1, value=int(selected[col]))
+            else:
+                inputs[col] = st.text_input(col, value=selected.get(col) or "")
 
         if st.form_submit_button("Update row"):
-            if not (module and tab_number and title):
+            if not (inputs["module"] and inputs["tab_number"] and inputs["title"]):
                 st.error("module, tab_number, and title are required.")
             else:
-                update_tab(
-                    tab_id,
-                    (
-                        module, tab_number, title, none_if_blank(subtitle),
-                        none_if_blank(video_url), none_if_blank(video_upload),
-                        none_if_blank(main_content), none_if_blank(markdown_sections),
-                        none_if_blank(code_example), none_if_blank(external_links),
-                        none_if_blank(table_data), none_if_blank(reference_links),
-                        none_if_blank(custom_module), int(display_order),
-                        none_if_blank(extra_html), none_if_blank(prompt),
-                    ),
-                )
+                update_tab(tab_id, tuple(none_if_blank(inputs[c]) for c in COLS))
                 st.success("Row updated!")
 
-# ───────────────────── 7. Guideline page ───────────────────────
+# ───────────────────── 7. Bulk Upload page ─────────────────────
+def bulk_page():
+    st.title("Bulk CSV Upload")
+
+    uploaded = st.file_uploader("Upload CSV", type="csv")
+    if not uploaded:
+        st.info("Awaiting CSV file.")
+        return
+
+    df = pd.read_csv(uploaded)
+    st.write("Preview:")
+    st.dataframe(df.head())
+
+    # Ensure all expected columns exist; fill missing with None
+    for col in COLS:
+        if col not in df.columns:
+            df[col] = None
+
+    mode = st.radio("Insert mode", ("Insert new rows", "Update if tab_id present"))
+
+    if st.button("Import"):
+        inserted = updated = 0
+        for _, r in df.iterrows():
+            values = tuple(
+                none_if_blank(r.get(col)) if col != "display_order"
+                else int(r.get(col) or 1)
+                for col in COLS
+            )
+
+            tab_id_val = int(r["tab_id"]) if "tab_id" in df.columns and pd.notna(r["tab_id"]) else None
+
+            try:
+                if mode == "Update if tab_id present" and tab_id_val:
+                    update_tab(tab_id_val, values)
+                    updated += 1
+                else:
+                    insert_tab(values)
+                    inserted += 1
+            except Exception as e:
+                st.error(f"Error on row {_}: {e}")
+
+        st.success(f"Inserted: {inserted}, Updated: {updated}")
+
+# ───────────────────── 8. Guideline page ───────────────────────
 def guideline_page():
     st.title("Row-wise Guideline")
 
@@ -192,10 +210,12 @@ def guideline_page():
     st.markdown("#### Raw JSON (copy-friendly)")
     st.code(json.dumps(selected, indent=2, ensure_ascii=False), language="json")
 
-# ───────────────────── 8. Router ───────────────────────────────
+# ───────────────────── 9. Router ───────────────────────────────
 if page == "Add":
     add_page()
 elif page == "Edit":
     edit_page()
+elif page == "Bulk Upload":
+    bulk_page()
 else:
     guideline_page()
