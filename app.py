@@ -1,49 +1,51 @@
-# app_course_tabs.py  — Admin + Row-wise Guideline
+# app_course_tabs.py  — Admin + Copy-Friendly Guideline
 import streamlit as st
 import mysql.connector
+import json
 from typing import Any, List, Dict
 
-# ----------------------- 1. DB connection ------------------------
+# ───────────────────────────── 1. DB connection ──────────────────────────────
 @st.cache_resource
 def get_connection():
+    cfg = st.secrets["mysql"]
     return mysql.connector.connect(
-        host=st.secrets["mysql"]["host"],
-        port=st.secrets["mysql"]["port"],
-        user=st.secrets["mysql"]["user"],
-        password=st.secrets["mysql"]["password"],
-        database=st.secrets["mysql"]["database"],
+        host=cfg["host"],
+        port=cfg["port"],
+        user=cfg["user"],
+        password=cfg["password"],
+        database=cfg["database"],
         autocommit=True,
     )
 
 conn = get_connection()
 
-# ----------------------- 2. Table guarantee ----------------------
+# ───────────────────────────── 2. Table guarantee ────────────────────────────
 with conn.cursor() as cur:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS course_tabs (
           tab_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-          module VARCHAR(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-          tab_number VARCHAR(10) COLLATE utf8mb4_unicode_ci NOT NULL,
-          title VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-          subtitle VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          video_url VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          video_upload VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-          main_content TEXT COLLATE utf8mb4_unicode_ci,
-          markdown_sections TEXT COLLATE utf8mb4_unicode_ci,
-          code_example TEXT COLLATE utf8mb4_unicode_ci,
-          external_links TEXT COLLATE utf8mb4_unicode_ci,
-          table_data TEXT COLLATE utf8mb4_unicode_ci,
-          reference_links TEXT COLLATE utf8mb4_unicode_ci,
-          custom_module VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+          module VARCHAR(50) NOT NULL,
+          tab_number VARCHAR(10) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          subtitle VARCHAR(255),
+          video_url VARCHAR(500),
+          video_upload VARCHAR(500),
+          main_content TEXT,
+          markdown_sections TEXT,
+          code_example TEXT,
+          external_links TEXT,
+          table_data TEXT,
+          reference_links TEXT,
+          custom_module VARCHAR(255),
           display_order INT NOT NULL,
-          extra_html TEXT COLLATE utf8mb4_unicode_ci,
-          prompt TEXT COLLATE utf8mb4_unicode_ci
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+          extra_html TEXT,
+          prompt TEXT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """
     )
 
-# ----------------------- 3. Helpers ------------------------------
+# ───────────────────────────── 3. Helpers ────────────────────────────────────
 def none_if_blank(v: str) -> Any:
     return None if not v.strip() else v
 
@@ -68,54 +70,54 @@ def fetch_tabs() -> List[Dict]:
         )
         return cur.fetchall()
 
-SCHEMA_DESC = {
-    "module": "Logical grouping (e.g., Week 1)",
-    "tab_number": "Unique ID within module (e.g., tab1)",
-    "title": "Main header",
-    "subtitle": "Secondary header",
-    "video_url": "YouTube/Vimeo link",
-    "video_upload": "Uploaded video path/URL",
-    "main_content": "Markdown body",
-    "markdown_sections": "JSON list of {header, content}",
-    "code_example": "Code snippet (plain text)",
-    "external_links": "JSON list of {title, url}",
-    "table_data": "JSON table",
-    "reference_links": "JSON references",
-    "custom_module": "Python module to import",
-    "display_order": "Sort order integer",
-    "extra_html": "Raw HTML",
-    "prompt": "ChatGPT prompt",
+COLUMN_DESC = {
+    "module":           "Logical grouping, e.g. 'Week 1'",
+    "tab_number":       "Unique ID inside module, e.g. 'tab1'",
+    "title":            "Main header",
+    "subtitle":         "Secondary header",
+    "video_url":        "YouTube / Vimeo link",
+    "video_upload":     "Path / URL of uploaded video",
+    "main_content":     "Markdown body",
+    "markdown_sections":"JSON list of {header, content}",
+    "code_example":     "Plain-text code snippet",
+    "external_links":   "JSON list of {title, url}",
+    "table_data":       "JSON table",
+    "reference_links":  "JSON references",
+    "custom_module":    "Python module name to import",
+    "display_order":    "Integer for sorting",
+    "extra_html":       "Raw HTML goodies",
+    "prompt":           "ChatGPT prompt text",
 }
 
-# ----------------------- 4. Page switcher ------------------------
-page = st.sidebar.radio("Select Page", ("Admin", "Guideline"))
+# ───────────────────────────── 4. Page switcher ──────────────────────────────
+page = st.sidebar.radio("Page", ("Admin", "Guideline"))
 
-# ----------------------- 5. Admin UI -----------------------------
+# ───────────────────────────── 5. Admin page ─────────────────────────────────
 if page == "Admin":
     st.title("Course Tabs Admin")
 
-    with st.form("new_tab", clear_on_submit=True):
-        st.markdown("Fields marked **bold** are required.")
-        module        = st.text_input("**Module**")
-        tab_number    = st.text_input("**Tab number**")
-        title         = st.text_input("**Title**")
-        subtitle      = st.text_input("Subtitle")
-        video_url     = st.text_input("Video URL")
-        video_upload  = st.text_input("Video upload path / URL")
-        main_content  = st.text_area("Main content (Markdown)", height=140)
-        markdown_sections = st.text_area("Markdown sections (JSON list)", height=90)
-        code_example  = st.text_area("Code example", height=110)
-        external_links = st.text_area("External links (JSON list)", height=70)
-        table_data    = st.text_area("Table data (JSON)", height=70)
-        reference_links = st.text_area("Reference links (JSON)", height=70)
-        custom_module = st.text_input("Custom module")
-        display_order = st.number_input("**Display order**", min_value=1, step=1, value=1)
-        extra_html    = st.text_area("Extra HTML", height=70)
-        prompt        = st.text_area("ChatGPT prompt", height=110)
+    with st.form(key="add_row", clear_on_submit=True):
+        st.markdown("Required fields are **bold**.")
+        module         = st.text_input("**module**")
+        tab_number     = st.text_input("**tab_number**")
+        title          = st.text_input("**title**")
+        subtitle       = st.text_input("subtitle")
+        video_url      = st.text_input("video_url")
+        video_upload   = st.text_input("video_upload")
+        main_content   = st.text_area("main_content", height=140)
+        markdown_sections = st.text_area("markdown_sections (JSON)", height=80)
+        code_example   = st.text_area("code_example", height=100)
+        external_links = st.text_area("external_links (JSON)", height=70)
+        table_data     = st.text_area("table_data (JSON)", height=70)
+        reference_links= st.text_area("reference_links (JSON)", height=70)
+        custom_module  = st.text_input("custom_module")
+        display_order  = st.number_input("**display_order**", min_value=1, value=1)
+        extra_html     = st.text_area("extra_html", height=70)
+        prompt         = st.text_area("prompt", height=100)
 
-        if st.form_submit_button("Save"):
+        if st.form_submit_button("Save row"):
             if not (module and tab_number and title):
-                st.error("Fill all required fields.")
+                st.error("Fill in module, tab_number and title.")
             else:
                 insert_tab(
                     (
@@ -131,26 +133,31 @@ if page == "Admin":
                 st.success("Row saved.")
 
     st.divider()
-    st.subheader("Existing Tabs")
+    st.subheader("Existing rows")
     rows = fetch_tabs()
-    st.dataframe(rows, use_container_width=True) if rows else st.info("No tabs yet.")
+    st.dataframe(rows, use_container_width=True) if rows else st.info("No rows yet.")
 
-# ----------------------- 6. Guideline UI -------------------------
+# ───────────────────────────── 6. Guideline page ─────────────────────────────
 else:
-    st.title("Row Guideline Viewer")
+    st.title("Row-Wise Guideline")
 
     rows = fetch_tabs()
     if not rows:
-        st.info("No data available.")
+        st.info("No data available. Add something in Admin first.")
         st.stop()
 
-    options = {f"{r['module']} | {r['tab_number']} | {r['title']}": r for r in rows}
-    choice = st.selectbox("Select a row to inspect", list(options.keys()))
-    row = options[choice]
+    # Select row to inspect
+    label = lambda r: f"{r['module']} | {r['tab_number']} | {r['title']}"
+    choice = st.selectbox("Choose a row", options=rows, format_func=label)
+    row = choice
 
-    st.markdown("### Column-by-Column Details")
-    data_for_table = [
-        {"Column": col, "Value": str(row.get(col, "")), "Description": SCHEMA_DESC[col]}
-        for col in SCHEMA_DESC
-    ]
-    st.table(data_for_table)
+    # 6a. Quick JSON block (easy to copy into ChatGPT)
+    st.markdown("#### Raw JSON (copy-paste friendly)")
+    st.code(json.dumps(row, indent=2), language="json")
+
+    # 6b. Column explanations with current value
+    st.markdown("#### Column-by-column guide")
+    for col, desc in COLUMN_DESC.items():
+        val = row.get(col)
+        printable = json.dumps(val, ensure_ascii=False) if isinstance(val, (dict, list)) else str(val)
+        st.markdown(f"- **{col}** → `{printable}`  \n  _{desc}_")
