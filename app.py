@@ -1,16 +1,16 @@
-# app_course_tabs.py  — Admin • Guideline • Edit
+# app_course_tabs.py  — Add • Edit • Guideline  (Streamlit ≥ v1.25)
 import streamlit as st
 import mysql.connector
 import json
 from typing import Any, List, Dict, Tuple
 
-# ───────────────────────── 1. Connect to MySQL ──────────────────────────
+# ───────────────────────── 1. Connect to MySQL ─────────────────────────
 @st.cache_resource
 def get_conn():
     cfg = st.secrets["mysql"]
     return mysql.connector.connect(
         host=cfg["host"],
-        port=cfg["port"],
+        port=int(cfg["port"]),
         user=cfg["user"],
         password=cfg["password"],
         database=cfg["database"],
@@ -19,7 +19,7 @@ def get_conn():
 
 conn = get_conn()
 
-# ──────────────────────── 2. Ensure table exists ───────────────────────
+# ──────────────────────── 2. Ensure table exists ──────────────────────
 DDL = """
 CREATE TABLE IF NOT EXISTS course_tabs (
   tab_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS course_tabs (
 with conn.cursor() as c:
     c.execute(DDL)
 
-# ───────────────────────── 3. Helper functions ─────────────────────────
+# ───────────────────────── 3. Helper functions ────────────────────────
 def none_if_blank(v: str) -> Any:
     return None if (v is None or not v.strip()) else v
 
@@ -83,32 +83,32 @@ def fetch_tabs() -> List[Dict]:
         return c.fetchall()
 
 COLUMN_DESC = {
-    "module":            "Grouping label, e.g. 'Week 1'",
-    "tab_number":        "Unique ID inside module, e.g. 'tab1'",
+    "module":            "Grouping label (e.g. Week 1)",
+    "tab_number":        "Unique ID inside module (e.g. tab1)",
     "title":             "Headline shown to learners",
     "subtitle":          "Optional sub-headline",
     "video_url":         "YouTube/Vimeo link",
     "video_upload":      "Path/URL to uploaded video",
     "main_content":      "Markdown body",
     "markdown_sections": "JSON list of {header, content}",
-    "code_example":      "Plain-text code snippet",
+    "code_example":      "Code snippet",
     "external_links":    "JSON list of {title, url}",
     "table_data":        "JSON table",
     "reference_links":   "JSON references",
-    "custom_module":     "Python module name to import",
+    "custom_module":     "Python module name",
     "display_order":     "Integer sort key",
     "extra_html":        "Raw HTML",
     "prompt":            "ChatGPT prompt",
 }
 
-# ───────────────────────── 4. Page selector ────────────────────────────
-page = st.sidebar.radio("Page", ("Admin", "Edit", "Guideline"))
+# ───────────────────────── 4. Page selector ───────────────────────────
+page = st.sidebar.radio("Page", ("Add", "Edit", "Guideline"))
 
-# ───────────────────────── 5. Admin (add) page ─────────────────────────
-if page == "Admin":
+# ───────────────────────── 5. Add page ───────────────────────────────
+if page == "Add":
     st.title("Add New Row")
 
-    with st.form("add_form", clear_on_submit=True):
+    with st.form("add_row", clear_on_submit=True):
         st.markdown("Required fields are **bold**.")
         module         = st.text_input("**module**")
         tab_number     = st.text_input("**tab_number**")
@@ -117,19 +117,19 @@ if page == "Admin":
         video_url      = st.text_input("video_url")
         video_upload   = st.text_input("video_upload")
         main_content   = st.text_area("main_content", height=120)
-        markdown_sections = st.text_area("markdown_sections (JSON)", height=70)
-        code_example   = st.text_area("code_example", height=90)
-        external_links = st.text_area("external_links (JSON)", height=60)
-        table_data     = st.text_area("table_data (JSON)", height=60)
-        reference_links= st.text_area("reference_links (JSON)", height=60)
+        markdown_sections = st.text_area("markdown_sections (JSON)", height=80)
+        code_example   = st.text_area("code_example", height=100)
+        external_links = st.text_area("external_links (JSON)", height=80)
+        table_data     = st.text_area("table_data (JSON)", height=80)
+        reference_links= st.text_area("reference_links (JSON)", height=80)
         custom_module  = st.text_input("custom_module")
         display_order  = st.number_input("**display_order**", min_value=1, value=1)
-        extra_html     = st.text_area("extra_html", height=60)
-        prompt         = st.text_area("prompt", height=90)
+        extra_html     = st.text_area("extra_html", height=80)
+        prompt         = st.text_area("prompt", height=100)
 
         if st.form_submit_button("Save row"):
             if not (module and tab_number and title):
-                st.error("Fill in module, tab_number and title.")
+                st.error("module, tab_number, and title are required.")
             else:
                 insert_tab(
                     (
@@ -148,7 +148,7 @@ if page == "Admin":
     st.subheader("Existing rows")
     st.dataframe(fetch_tabs(), use_container_width=True)
 
-# ───────────────────────── 6. Edit page ───────────────────────────────
+# ───────────────────────── 6. Edit page ──────────────────────────────
 elif page == "Edit":
     st.title("Edit Existing Row")
 
@@ -157,9 +157,8 @@ elif page == "Edit":
         st.info("No data to edit.")
         st.stop()
 
-    # Select row
     label = lambda r: f"{r['module']} | {r['tab_number']} | {r['title']}"
-    selected = st.selectbox("Choose a row", options=rows, format_func=label)
+    selected = st.selectbox("Choose a row", rows, format_func=label)
     tab_id = selected["tab_id"]
 
     with st.form(f"edit_{tab_id}"):
@@ -170,23 +169,19 @@ elif page == "Edit":
         video_url      = st.text_input("video_url",        value=selected.get("video_url") or "")
         video_upload   = st.text_input("video_upload",     value=selected.get("video_upload") or "")
         main_content   = st.text_area("main_content",      value=selected.get("main_content") or "", height=120)
-        markdown_sections = st.text_area(
-            "markdown_sections (JSON)",
-            value=selected.get("markdown_sections") or "",
-            height=70,
-        )
-        code_example   = st.text_area("code_example",      value=selected.get("code_example") or "", height=90)
-        external_links = st.text_area("external_links (JSON)", value=selected.get("external_links") or "", height=60)
-        table_data     = st.text_area("table_data (JSON)", value=selected.get("table_data") or "", height=60)
-        reference_links= st.text_area("reference_links (JSON)", value=selected.get("reference_links") or "", height=60)
+        markdown_sections = st.text_area("markdown_sections (JSON)", value=selected.get("markdown_sections") or "", height=80)
+        code_example   = st.text_area("code_example",      value=selected.get("code_example") or "", height=100)
+        external_links = st.text_area("external_links (JSON)", value=selected.get("external_links") or "", height=80)
+        table_data     = st.text_area("table_data (JSON)", value=selected.get("table_data") or "", height=80)
+        reference_links= st.text_area("reference_links (JSON)", value=selected.get("reference_links") or "", height=80)
         custom_module  = st.text_input("custom_module",    value=selected.get("custom_module") or "")
         display_order  = st.number_input("display_order",  min_value=1, value=int(selected["display_order"]))
-        extra_html     = st.text_area("extra_html",        value=selected.get("extra_html") or "", height=60)
-        prompt         = st.text_area("prompt",            value=selected.get("prompt") or "", height=90)
+        extra_html     = st.text_area("extra_html",        value=selected.get("extra_html") or "", height=80)
+        prompt         = st.text_area("prompt",            value=selected.get("prompt") or "", height=100)
 
         if st.form_submit_button("Update row"):
             if not (module and tab_number and title):
-                st.error("module, tab_number and title are required.")
+                st.error("module, tab_number, and title are required.")
             else:
                 update_tab(
                     tab_id,
@@ -202,9 +197,9 @@ elif page == "Edit":
                 )
                 st.success("Row updated!")
 
-# ───────────────────────── 7. Guideline page ──────────────────────────
+# ───────────────────────── 7. Guideline page ─────────────────────────
 else:
-    st.title("Row-Wise Guideline")
+    st.title("Row-wise Guideline")
 
     rows = fetch_tabs()
     if not rows:
@@ -212,7 +207,7 @@ else:
         st.stop()
 
     label = lambda r: f"{r['module']} | {r['tab_number']} | {r['title']}"
-    selected = st.selectbox("Choose a row", options=rows, format_func=label)
+    selected = st.selectbox("Choose a row", rows, format_func=label)
 
     st.markdown("#### Raw JSON (copy-friendly)")
     st.code(json.dumps(selected, indent=2, ensure_ascii=False), language="json")
