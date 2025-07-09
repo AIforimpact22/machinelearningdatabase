@@ -1,108 +1,116 @@
 # pages/bulk.py
-import streamlit as st, pandas as pd, io
-from common import TABLES, none_if_blank, insert_row, update_row
 
-# ───────────────────── 1. Helper ────────────────────────────
-def choose_table_for_csv(df: pd.DataFrame) -> str | None:
-    """
-    Return the table whose required-columns are fully satisfied
-    by this dataframe.  If none or several match, return None.
-    """
-    candidates = []
-    for name, meta in TABLES.items():
-        if set(meta["required"]).issubset(df.columns):
-            candidates.append(name)
-    return candidates[0] if len(candidates) == 1 else None
+import streamlit as st
+import pandas as pd
+import io
 
+from common import table_selector, TABLES, none_if_blank, insert_row, update_row
 
-# ───────────────────── 2. Upload area ───────────────────────
-st.title("📥 Bulk CSV import")
+# ───────────────────── 1. Which table? ──────────────────────
+table   = table_selector()
+META    = TABLES[table]
+PK      = META["pk"]
+COLS    = META["cols"]
+REQUIRED = set(META["required"])
 
-file = st.file_uploader("Upload your CSV", type="csv")
-if file is None:
+st.title(f"📥 Bulk CSV → {table}")
+
+# ───────────────────── 2. CSV template ──────────────────────
+st.markdown("#### CSV template")
+sample_df = pd.DataFrame(META["sample"])
+buf = io.StringIO()
+sample_df.to_csv(buf, index=False)
+st.code(buf.getvalue(), language="csv")
+st.download_button("Download template", buf.getvalue(),
+                   file_name=f"{table}_sample.csv")
+
+# ───────────────────── 3. Upload your CSV ───────────────────
+uploaded = st.file_uploader("Upload your CSV here", type="csv")
+if not uploaded:
     st.stop()
 
-df = pd.read_csv(file)
-st.markdown("Preview:")
+df = pd.read_csv(uploaded)
+st.markdown("##### Preview of uploaded data")
 st.dataframe(df.head(), use_container_width=True)
 
-# ───────────────────── 3. Work out the table ────────────────
-if "table_choice" not in st.session_state:
-    st.session_state.table_choice = list(TABLES.keys())[0]
+# ───────────────────── 4. Table-match check ─────────────────
+# Find which tables this CSV could belong to
+matches = [
+    name
+    for name, meta in TABLES.items()
+    if set(meta["required"]).issubset(df.columns)
+]
 
-selected_table = st.session_state.table_choice
-
-auto_table = choose_table_for_csv(df)
-if auto_table and auto_table != selected_table:
-    st.info(
-        f"⚡ Detected that your CSV fits **{auto_table}** "
-        f"(not **{selected_table}**). Switching automatically…"
-    )
-    st.session_state.table_choice = auto_table
-    st.experimental_rerun()
-
-table = selected_table            # after possible rerun
-META  = TABLES[table]
-PK, COLS, REQ = META["pk"], META["cols"], set(META["required"])
-
-st.subheader(f"Target table → `{table}`")
-
-# ───────────────────── 4. Check required columns ────────────
-missing_req = [c for c in REQ if c not in df.columns]
-if missing_req:
-    st.error(
-        "CSV is missing **required** columns: "
-        + ", ".join(missing_req)
-    )
+if table not in matches:
+    if len(matches) == 1:
+        st.error(
+            f"⚠️  It looks like your CSV fits **{matches[0]}**, "
+            f"but you have **{table}** selected.  \n"
+            "Please switch tables in the sidebar and try again."
+        )
+    elif matches:
+        st.error(
+            f"⚠️  Your CSV matches multiple tables ({', '.join(matches)}).  \n"
+            "Please pick the correct one in the sidebar."
+        )
+    else:
+        missing = REQUIRED - set(df.columns)
+        st.error(
+            f"⚠️  CSV is missing required columns for **{table}**: "
+            f"{', '.join(missing)}"
+        )
     st.stop()
 
-# Add any optional columns that are absent so we can iterate safely
+# ───────────────────── 5. Prepare DataFrame ─────────────────
+# Ensure all expected columns exist so we can iterate safely
 for col in COLS:
     if col not in df.columns:
         df[col] = None
 
-# ───────────────────── 5. Normalise integer columns ─────────
-for col in ("display_order", "points"):
-    if col in df.columns:
-        df[col] = (
-            pd.to_numeric(df[col], errors="coerce")
+# Coerce integer columns so they never land as NULL
+for intcol in ("display_order", "points"):
+    if intcol in df.columns:
+        df[intcol] = (
+            pd.to_numeric(df[intcol], errors="coerce")
               .fillna(1)
               .astype(int)
         )
 
 mode = st.radio("Mode", ("Insert only", "Update if PK present"))
 
-# ───────────────────── 6. Import rows ───────────────────────
-if st.button("Import"):
-    ins = upd = skip = 0
+# ───────────────────── 6. Do the import ────────────────────
+if st.button("Import CSV"):
+    inserted = updated = skipped = 0
 
     for idx, row in df.iterrows():
-
-        # (a) Skip rows that still lack any required cell value
-        if any(pd.isna(row[c]) or str(row[c]).strip() == "" for c in REQ):
-            skip += 1
+        # skip if any required cell is blank/null
+        if any(pd.isna(row[c]) or str(row[c]).strip() == "" for c in REQUIRED):
+            skipped += 1
             st.warning(f"Row {idx}: missing required data → skipped")
             continue
 
-        # (b) Build the value list in the exact order COLS expects
-        vals = tuple(none_if_blank(row.get(c)) for c in COLS)
+        # build tuple in the exact order COLS defines (no PK here!)
+        values = tuple(none_if_blank(row.get(c)) for c in COLS)
 
-        # (c) Check for primary key value only if the CSV supplies it
-        pk_val = (
-            int(row[PK]) if PK in df.columns and pd.notna(row[PK]) else None
-        )
+        # only attempt update if user-supplied a PK in the CSV
+        pk_val = None
+        if PK in df.columns and pd.notna(row[PK]):
+            try:
+                pk_val = int(row[PK])
+            except:
+                pass
 
         try:
             if mode == "Update if PK present" and pk_val:
-                update_row(table, pk_val, vals)
-                upd += 1
+                update_row(table, pk_val, values)
+                updated += 1
             else:
-                insert_row(table, vals)
-                ins += 1
+                insert_row(table, values)
+                inserted += 1
         except Exception as e:
-            skip += 1
+            skipped += 1
             st.error(f"Row {idx}: {e}")
 
     st.success(
-        f"Finished →  Inserted: {ins}   Updated: {upd}   Skipped: {skip}"
+        f"✅ Done!  Inserted: {inserted}   Updated: {updated}   Skipped: {skipped}"
     )
