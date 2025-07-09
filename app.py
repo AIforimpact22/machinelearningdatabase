@@ -75,6 +75,8 @@ TABLES: Dict[str, Dict] = {
             "extra_html","prompt"
         ],
         "required": ["module","tab_number","title"],
+        "csv_example": """module,tab_number,title,subtitle,video_url,video_upload,main_content,markdown_sections,code_example,external_links,table_data,reference_links,custom_module,display_order,extra_html,prompt
+Week 1,tab1,Intro to Python,,,,,"# Welcome to Python",,,,"",,,1,,"""
     },
     "course_tasks": {
         "pk": "task_id",
@@ -83,6 +85,8 @@ TABLES: Dict[str, Dict] = {
             "assignment_details","solution","points","due_date"
         ],
         "required": ["tab_id","task_type","question"],
+        "csv_example": """tab_id,task_type,question,options_json,correct_answer,assignment_details,solution,points,due_date
+6,quiz,"Which Pandas command reads a CSV?","[""A. read_table()"",""B. pd.read_csv()""]","B",,,""",1,"""
     },
 }
 
@@ -131,11 +135,11 @@ def add_page():
     with st.form("add_form", clear_on_submit=True):
         inputs: Dict[str, Any] = {}
         for col in COLS:
-            # decide widget type
             if col in ("main_content","markdown_sections","code_example",
                        "external_links","table_data","reference_links",
                        "assignment_details","solution","extra_html","prompt","question","options_json"):
-                inputs[col] = st.text_area(col, height=120 if col=="main_content" else 90)
+                height = 120 if col in ("main_content","assignment_details") else 90
+                inputs[col] = st.text_area(col, height=height)
             elif col == "task_type":
                 inputs[col] = st.selectbox(col, ("quiz","assignment"))
             elif col == "points":
@@ -143,7 +147,7 @@ def add_page():
             elif col == "display_order":
                 inputs[col] = st.number_input(col, min_value=1, value=1)
             elif col == "due_date":
-                inputs[col] = st.date_input(col, value=datetime.date.today())
+                inputs[col] = st.date_input(col, value=None)
             else:
                 inputs[col] = st.text_input(col)
 
@@ -179,7 +183,8 @@ def edit_page():
             if col in ("main_content","markdown_sections","code_example",
                        "external_links","table_data","reference_links",
                        "assignment_details","solution","extra_html","prompt","question","options_json"):
-                inputs[col] = st.text_area(col, value=current or "", height=120 if col=="main_content" else 90)
+                height = 120 if col in ("main_content","assignment_details") else 90
+                inputs[col] = st.text_area(col, value=current or "", height=height)
             elif col == "task_type":
                 inputs[col] = st.selectbox(col, ("quiz","assignment"), index=0 if current=="quiz" else 1)
             elif col == "points":
@@ -187,7 +192,7 @@ def edit_page():
             elif col == "display_order":
                 inputs[col] = st.number_input(col, min_value=1, value=int(current or 1))
             elif col == "due_date":
-                date_val = current if isinstance(current, datetime.date) else datetime.date.today()
+                date_val = current if isinstance(current, datetime.date) else None
                 inputs[col] = st.date_input(col, value=date_val)
             else:
                 inputs[col] = st.text_input(col, value=current or "")
@@ -204,7 +209,13 @@ def edit_page():
 def bulk_page():
     st.title(f"Bulk CSV → {table_choice}")
 
-    file = st.file_uploader("CSV file", type="csv")
+    st.markdown("##### Expected CSV header")
+    st.code(",".join(COLS), language="csv")
+
+    st.markdown("##### Minimal example")
+    st.code(META["csv_example"], language="csv")
+
+    file = st.file_uploader("Upload CSV file", type="csv")
     if not file:
         return
 
@@ -219,12 +230,12 @@ def bulk_page():
 
     if st.button("Import"):
         ins = upd = 0
-        for _, r in df.iterrows():
+        for idx, r in df.iterrows():
             vals = []
             for col in COLS:
                 val = r.get(col)
-                if col == "display_order" or col == "points":
-                    val = int(val) if pd.notna(val) else 1
+                if col in ("display_order","points") and pd.notna(val):
+                    val = int(val)
                 vals.append(none_if_blank(val))
             vals_t = tuple(vals)
 
@@ -237,7 +248,7 @@ def bulk_page():
                     insert_row(table_choice, vals_t)
                     ins += 1
             except Exception as e:
-                st.error(f"Row {_} error: {e}")
+                st.error(f"Row {idx} error: {e}")
         st.success(f"Inserted {ins}, Updated {upd}")
 
 # ───────────────────── 9. Guideline page ───────────────────────
