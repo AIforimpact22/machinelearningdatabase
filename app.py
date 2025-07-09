@@ -1,11 +1,11 @@
 # app_course_tabs.py
 import streamlit as st
 import mysql.connector
-from typing import Any
+from typing import Any, List, Dict
 
-# ------------------------------------------------------------------ #
-# 1. DB connection and table guarantee
-# ------------------------------------------------------------------ #
+# ---------------------------------------------------------------
+# 1. DB connection (block [mysql] in secrets.toml)
+# ---------------------------------------------------------------
 @st.cache_resource
 def get_connection():
     return mysql.connector.connect(
@@ -44,12 +44,10 @@ cur.execute(
 )
 cur.close()
 
-
-# ------------------------------------------------------------------ #
+# ---------------------------------------------------------------
 # 2. Helpers
-# ------------------------------------------------------------------ #
+# ---------------------------------------------------------------
 def none_if_blank(value: str) -> Any:
-    """Return None for blank strings (to store as SQL NULL)."""
     return None if not value.strip() else value
 
 def insert_tab(row):
@@ -66,72 +64,119 @@ def insert_tab(row):
             row,
         )
 
-def fetch_tabs():
+def fetch_tabs() -> List[Dict]:
     with conn.cursor(dictionary=True) as c:
         c.execute(
             "SELECT * FROM course_tabs ORDER BY module, display_order, tab_number;"
         )
         return c.fetchall()
 
+# Column descriptions for the guideline page
+SCHEMA = [
+    ("module", "Logical grouping (e.g., Week 1, Introduction)"),
+    ("tab_number", "Unique ID within module (e.g., tab1)"),
+    ("title", "Main header displayed to users"),
+    ("subtitle", "Optional secondary header"),
+    ("video_url", "YouTube/Vimeo link"),
+    ("video_upload", "Path/URL to an uploaded video"),
+    ("main_content", "Markdown body text"),
+    ("markdown_sections", "JSON list of {header, content} blocks"),
+    ("code_example", "Plain text code snippet"),
+    ("external_links", "JSON list of {title, url}"),
+    ("table_data", "JSON table content"),
+    ("reference_links", "JSON list of references"),
+    ("custom_module", "Python module to import/render"),
+    ("display_order", "Integer ordering within module"),
+    ("extra_html", "Raw HTML for advanced customization"),
+    ("prompt", "Stored ChatGPT prompt"),
+]
 
-# ------------------------------------------------------------------ #
-# 3. Streamlit UI
-# ------------------------------------------------------------------ #
-st.title("Course Tabs Admin")
+# ---------------------------------------------------------------
+# 3. Page selector
+# ---------------------------------------------------------------
+page = st.sidebar.radio("Select Page", ("Admin", "Guideline"))
 
-with st.form("new_tab", clear_on_submit=True):
-    st.markdown("Fields marked **bold** are required.")
-    module        = st.text_input("**Module** (e.g. week1, ML101)")
-    tab_number    = st.text_input("**Tab number** (e.g. 1.1)")
-    title         = st.text_input("**Title**")
-    subtitle      = st.text_input("Subtitle")
-    video_url     = st.text_input("Video URL")
-    video_upload  = st.text_input("Video upload path / URL")
-    main_content  = st.text_area("Main content (Markdown)", height=140)
-    markdown_sections = st.text_area("Markdown sections (JSON list)", height=90)
-    code_example  = st.text_area("Code example", height=110)
-    external_links = st.text_area("External links (JSON list)", height=70)
-    table_data    = st.text_area("Table data (JSON)", height=70)
-    reference_links = st.text_area("Reference links (JSON)", height=70)
-    custom_module = st.text_input("Custom module")
-    display_order = st.number_input("**Display order**", min_value=1, step=1, value=1)
-    extra_html    = st.text_area("Extra HTML", height=70)
-    prompt        = st.text_area("ChatGPT prompt", height=110)
+# ---------------------------------------------------------------
+# 4. Admin page
+# ---------------------------------------------------------------
+if page == "Admin":
+    st.title("Course Tabs Admin")
 
-    if st.form_submit_button("Save"):
-        # basic validation for required fields
-        if not module.strip() or not tab_number.strip() or not title.strip():
-            st.error("Please fill in all required fields (bold labels).")
-        else:
-            try:
-                insert_tab(
-                    (
-                        module.strip(),
-                        tab_number.strip(),
-                        title.strip(),
-                        none_if_blank(subtitle),
-                        none_if_blank(video_url),
-                        none_if_blank(video_upload),
-                        none_if_blank(main_content),
-                        none_if_blank(markdown_sections),
-                        none_if_blank(code_example),
-                        none_if_blank(external_links),
-                        none_if_blank(table_data),
-                        none_if_blank(reference_links),
-                        none_if_blank(custom_module),
-                        int(display_order),
-                        none_if_blank(extra_html),
-                        none_if_blank(prompt),
+    with st.form("new_tab", clear_on_submit=True):
+        st.markdown("Fields marked **bold** are required.")
+        module        = st.text_input("**Module** (e.g. Week 1)")
+        tab_number    = st.text_input("**Tab number** (e.g. tab1)")
+        title         = st.text_input("**Title**")
+        subtitle      = st.text_input("Subtitle")
+        video_url     = st.text_input("Video URL")
+        video_upload  = st.text_input("Video upload path / URL")
+        main_content  = st.text_area("Main content (Markdown)", height=140)
+        markdown_sections = st.text_area("Markdown sections (JSON list)", height=90)
+        code_example  = st.text_area("Code example", height=110)
+        external_links = st.text_area("External links (JSON list)", height=70)
+        table_data    = st.text_area("Table data (JSON)", height=70)
+        reference_links = st.text_area("Reference links (JSON)", height=70)
+        custom_module = st.text_input("Custom module")
+        display_order = st.number_input("**Display order**", min_value=1, step=1, value=1)
+        extra_html    = st.text_area("Extra HTML", height=70)
+        prompt        = st.text_area("ChatGPT prompt", height=110)
+
+        if st.form_submit_button("Save"):
+            if not module.strip() or not tab_number.strip() or not title.strip():
+                st.error("Please fill in all required fields (bold labels).")
+            else:
+                try:
+                    insert_tab(
+                        (
+                            module.strip(),
+                            tab_number.strip(),
+                            title.strip(),
+                            none_if_blank(subtitle),
+                            none_if_blank(video_url),
+                            none_if_blank(video_upload),
+                            none_if_blank(main_content),
+                            none_if_blank(markdown_sections),
+                            none_if_blank(code_example),
+                            none_if_blank(external_links),
+                            none_if_blank(table_data),
+                            none_if_blank(reference_links),
+                            none_if_blank(custom_module),
+                            int(display_order),
+                            none_if_blank(extra_html),
+                            none_if_blank(prompt),
+                        )
                     )
-                )
-                st.success(f"Saved tab {module.strip()} – {tab_number.strip()}")
-            except Exception as e:
-                st.error(f"Insert failed: {e}")
+                    st.success(f"Saved tab {module.strip()} – {tab_number.strip()}")
+                except Exception as e:
+                    st.error(f"Insert failed: {e}")
 
-st.divider()
-st.subheader("Existing Tabs")
-tabs = fetch_tabs()
-if tabs:
-    st.dataframe(tabs, use_container_width=True)
+    st.divider()
+    st.subheader("Existing Tabs")
+    rows = fetch_tabs()
+    if rows:
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.info("No tabs yet.")
+
+# ---------------------------------------------------------------
+# 5. Guideline page
+# ---------------------------------------------------------------
 else:
-    st.info("No tabs yet.")
+    st.title("course_tabs Schema Guideline")
+
+    st.markdown(
+        """
+        Below is a quick reference for every column in **course_tabs** and what kind of
+        data you should provide. Use this as a checklist when adding new rows.
+        """
+    )
+
+    guideline = {name: desc for name, desc in SCHEMA}
+    st.table(guideline)
+
+    st.markdown("### Example Row")
+    example = fetch_tabs()[0] if fetch_tabs() else {}
+    if example:
+        st.json(example)
+    else:
+        st.info("No sample data yet — add a tab on the Admin page first.")
