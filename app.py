@@ -1,10 +1,10 @@
-# app_course_tabs.py  — Add • Edit • Guideline  (Streamlit ≥ v1.25)
+# app_course_tabs.py  — Add • Edit • Guideline  (streamlined)
 import streamlit as st
 import mysql.connector
 import json
-from typing import Any, List, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
-# ───────────────────────── 1. Connect to MySQL ─────────────────────────
+# ───────────────────── 1. MySQL connection ─────────────────────
 @st.cache_resource
 def get_conn():
     cfg = st.secrets["mysql"]
@@ -19,10 +19,10 @@ def get_conn():
 
 conn = get_conn()
 
-# ──────────────────────── 2. Ensure table exists ──────────────────────
+# ───────────────────── 2. Ensure table ─────────────────────────
 DDL = """
 CREATE TABLE IF NOT EXISTS course_tabs (
-  tab_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tab_id INT AUTO_INCREMENT PRIMARY KEY,
   module VARCHAR(50) NOT NULL,
   tab_number VARCHAR(10) NOT NULL,
   title VARCHAR(255) NOT NULL,
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS course_tabs (
 with conn.cursor() as c:
     c.execute(DDL)
 
-# ───────────────────────── 3. Helper functions ────────────────────────
-def none_if_blank(v: str) -> Any:
+# ───────────────────── 3. Helpers ──────────────────────────────
+def none_if_blank(v: str | None) -> Any:
     return None if (v is None or not v.strip()) else v
 
 def insert_tab(row: Tuple):
@@ -82,34 +82,14 @@ def fetch_tabs() -> List[Dict]:
         c.execute("SELECT * FROM course_tabs ORDER BY module, display_order, tab_number")
         return c.fetchall()
 
-COLUMN_DESC = {
-    "module":            "Grouping label (e.g. Week 1)",
-    "tab_number":        "Unique ID inside module (e.g. tab1)",
-    "title":             "Headline shown to learners",
-    "subtitle":          "Optional sub-headline",
-    "video_url":         "YouTube/Vimeo link",
-    "video_upload":      "Path/URL to uploaded video",
-    "main_content":      "Markdown body",
-    "markdown_sections": "JSON list of {header, content}",
-    "code_example":      "Code snippet",
-    "external_links":    "JSON list of {title, url}",
-    "table_data":        "JSON table",
-    "reference_links":   "JSON references",
-    "custom_module":     "Python module name",
-    "display_order":     "Integer sort key",
-    "extra_html":        "Raw HTML",
-    "prompt":            "ChatGPT prompt",
-}
-
-# ───────────────────────── 4. Page selector ───────────────────────────
+# ───────────────────── 4. Page selector ────────────────────────
 page = st.sidebar.radio("Page", ("Add", "Edit", "Guideline"))
 
-# ───────────────────────── 5. Add page ───────────────────────────────
-if page == "Add":
+# ───────────────────── 5. Add page ─────────────────────────────
+def add_page():
     st.title("Add New Row")
 
     with st.form("add_row", clear_on_submit=True):
-        st.markdown("Required fields are **bold**.")
         module         = st.text_input("**module**")
         tab_number     = st.text_input("**tab_number**")
         title          = st.text_input("**title**")
@@ -148,14 +128,14 @@ if page == "Add":
     st.subheader("Existing rows")
     st.dataframe(fetch_tabs(), use_container_width=True)
 
-# ───────────────────────── 6. Edit page ──────────────────────────────
-elif page == "Edit":
+# ───────────────────── 6. Edit page ────────────────────────────
+def edit_page():
     st.title("Edit Existing Row")
 
     rows = fetch_tabs()
     if not rows:
         st.info("No data to edit.")
-        st.stop()
+        return
 
     label = lambda r: f"{r['module']} | {r['tab_number']} | {r['title']}"
     selected = st.selectbox("Choose a row", rows, format_func=label)
@@ -197,14 +177,14 @@ elif page == "Edit":
                 )
                 st.success("Row updated!")
 
-# ───────────────────────── 7. Guideline page ─────────────────────────
-else:
+# ───────────────────── 7. Guideline page ───────────────────────
+def guideline_page():
     st.title("Row-wise Guideline")
 
     rows = fetch_tabs()
     if not rows:
         st.info("No data available.")
-        st.stop()
+        return
 
     label = lambda r: f"{r['module']} | {r['tab_number']} | {r['title']}"
     selected = st.selectbox("Choose a row", rows, format_func=label)
@@ -212,8 +192,10 @@ else:
     st.markdown("#### Raw JSON (copy-friendly)")
     st.code(json.dumps(selected, indent=2, ensure_ascii=False), language="json")
 
-    st.markdown("#### Column explanations")
-    for col, desc in COLUMN_DESC.items():
-        val = selected.get(col)
-        printable = json.dumps(val, ensure_ascii=False) if isinstance(val, (dict, list)) else str(val)
-        st.markdown(f"- **{col}** → `{printable}`  \n  _{desc}_")
+# ───────────────────── 8. Router ───────────────────────────────
+if page == "Add":
+    add_page()
+elif page == "Edit":
+    edit_page()
+else:
+    guideline_page()
