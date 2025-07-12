@@ -13,26 +13,40 @@ if not rows:
     st.info("No data to show.")
     st.stop()
 
-# Group by 'module'
+# Group rows by module and sort by tab_number
 modules = defaultdict(list)
 for row in rows:
     modules[row["module"]].append(row)
-
-# Sort rows within each module by 'tab_number'
 for module, module_rows in modules.items():
     modules[module] = sorted(module_rows, key=lambda r: r.get("tab_number", 0))
 
-selected = None
-for module in sorted(modules.keys()):
-    with st.expander(f"Module: {module}", expanded=True):
-        # Show each row as a button, display PK and tab_number for clarity
-        for row in modules[module]:
-            label = f"{table[:-1].capitalize()} {row[PK]} (Tab {row.get('tab_number', '-')})"
-            if st.button(label, key=f"{module}_{row[PK]}"):
-                selected = row
+# --- UI Layout ---
+col1, col2 = st.columns([1.2, 2])
 
-if selected:
-    st.subheader("Selected Row")
-    st.code(json.dumps(selected, indent=2, default=str), language="json")
-elif len(rows) > 0:
-    st.info("Click any row above to see its details.")
+with col1:
+    st.header("Modules & Tabs")
+    # A session state to track which row is selected
+    if "selected_pk" not in st.session_state:
+        st.session_state.selected_pk = None
+
+    for module in sorted(modules.keys()):
+        with st.expander(f"Module: {module}", expanded=True):
+            for row in modules[module]:
+                label = f"{table[:-1].capitalize()} {row[PK]} (Tab {row.get('tab_number', '-')})"
+                if st.button(label, key=f"{module}_{row[PK]}"):
+                    st.session_state.selected_pk = row[PK]
+
+with col2:
+    st.header("Selected Row")
+    # Find selected row from session state
+    selected = None
+    if st.session_state.selected_pk is not None:
+        for row in rows:
+            if row[PK] == st.session_state.selected_pk:
+                selected = row
+                break
+    if selected:
+        st.code(json.dumps(selected, indent=2, default=str), language="json")
+    else:
+        st.info("Select any row from the left to see its details.")
+
