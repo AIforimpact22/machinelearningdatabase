@@ -1,7 +1,11 @@
 import streamlit as st, datetime
-from common import table_selector, TABLES, none_if_blank, update_row, fetch_all, delete_row
 from collections import defaultdict
 import json
+
+from common import (
+    table_selector, TABLES, none_if_blank,
+    update_row, fetch_all, delete_row
+)
 
 table = table_selector()
 META = TABLES[table]
@@ -14,12 +18,12 @@ if not rows:
     st.info("No data yet.")
     st.stop()
 
-# Group by module and sort by tab_number
+# Group rows by module, sort within each by tab_number
 modules = defaultdict(list)
 for row in rows:
     modules[row["module"]].append(row)
-for module, module_rows in modules.items():
-    modules[module] = sorted(module_rows, key=lambda r: r.get("tab_number", 0))
+for module in modules:
+    modules[module] = sorted(modules[module], key=lambda r: r.get("tab_number", 0))
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -66,38 +70,28 @@ with col2:
                 else:
                     inputs[col] = st.text_input(col, **kw)
 
-            update = st.form_submit_button("Update")
-            # Use st.session_state to show delete confirm
-            if "delete_confirm" not in st.session_state:
-                st.session_state.delete_confirm = False
-            delete = st.form_submit_button("Delete", type="primary", use_container_width=True)
+            update_clicked = st.form_submit_button("Update")
+            # End of form
 
-        if update:
+        # Separate Delete button (not inside the form)
+        delete_clicked = st.button(
+            "Delete", type="primary", key=f"delete_{pk_val}", help="Permanently delete this row"
+        )
+
+        if update_clicked:
             if not all(inputs[c] for c in REQ):
                 st.error(f"Required fields: {', '.join(REQ)}")
             else:
                 vals = tuple(none_if_blank(inputs[c]) for c in COLS)
                 update_row(table, pk_val, vals)
                 st.success("✅ Row updated.")
-                st.experimental_rerun()
-        elif delete:
-            st.session_state.delete_confirm = True
 
-        # Confirm deletion in a separate box (to prevent accidental delete)
-        if st.session_state.delete_confirm:
-            st.warning("Are you sure you want to delete this row? This cannot be undone.")
-            colA, colB = st.columns(2)
-            with colA:
-                if st.button("Yes, delete", key="delete_yes"):
-                    delete_row(table, pk_val)
-                    st.success("✅ Row deleted.")
-                    st.session_state.edit_selected_pk = None
-                    st.session_state.delete_confirm = False
-                    st.experimental_rerun()
-            with colB:
-                if st.button("Cancel", key="delete_no"):
-                    st.session_state.delete_confirm = False
+        if delete_clicked:
+            delete_row(table, pk_val)
+            st.session_state.edit_selected_pk = None
+            st.success("🗑️ Row deleted. Please select another row to edit.")
 
     else:
         st.info("Select a row from the left to edit or delete.")
+
 
