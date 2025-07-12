@@ -66,27 +66,38 @@ with col2:
                 else:
                     inputs[col] = st.text_input(col, **kw)
 
-            colu1, colu2 = st.columns([2, 1])
-            update_clicked = colu1.form_submit_button("Update")
-            delete_clicked = colu2.form_submit_button("Delete", type="primary")
+            update = st.form_submit_button("Update")
+            # Use st.session_state to show delete confirm
+            if "delete_confirm" not in st.session_state:
+                st.session_state.delete_confirm = False
+            delete = st.form_submit_button("Delete", type="primary", use_container_width=True)
 
-            if update_clicked:
-                if not all(inputs[c] for c in REQ):
-                    st.error(f"Required fields: {', '.join(REQ)}")
-                else:
-                    vals = tuple(none_if_blank(inputs[c]) for c in COLS)
-                    update_row(table, pk_val, vals)
-                    st.success("✅ Row updated.")
+        if update:
+            if not all(inputs[c] for c in REQ):
+                st.error(f"Required fields: {', '.join(REQ)}")
+            else:
+                vals = tuple(none_if_blank(inputs[c]) for c in COLS)
+                update_row(table, pk_val, vals)
+                st.success("✅ Row updated.")
+                st.experimental_rerun()
+        elif delete:
+            st.session_state.delete_confirm = True
 
-            # Delete logic with confirmation
-            if delete_clicked:
-                st.warning("⚠️ This will permanently delete this row!")
-                confirm = st.checkbox("Yes, I want to delete this row", key=f"delete_confirm_{pk_val}")
-                if confirm:
+        # Confirm deletion in a separate box (to prevent accidental delete)
+        if st.session_state.delete_confirm:
+            st.warning("Are you sure you want to delete this row? This cannot be undone.")
+            colA, colB = st.columns(2)
+            with colA:
+                if st.button("Yes, delete", key="delete_yes"):
                     delete_row(table, pk_val)
                     st.success("✅ Row deleted.")
-                    # Reset selection after delete
                     st.session_state.edit_selected_pk = None
+                    st.session_state.delete_confirm = False
                     st.experimental_rerun()
+            with colB:
+                if st.button("Cancel", key="delete_no"):
+                    st.session_state.delete_confirm = False
+
     else:
-        st.info("Select a row from the left to edit or delete its details.")
+        st.info("Select a row from the left to edit or delete.")
+
