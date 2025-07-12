@@ -1,5 +1,5 @@
 import streamlit as st, datetime
-from common import table_selector, TABLES, none_if_blank, update_row, fetch_all
+from common import table_selector, TABLES, none_if_blank, update_row, fetch_all, delete_row
 from collections import defaultdict
 import json
 
@@ -66,12 +66,27 @@ with col2:
                 else:
                     inputs[col] = st.text_input(col, **kw)
 
-            if st.form_submit_button("Update"):
+            colu1, colu2 = st.columns([2, 1])
+            update_clicked = colu1.form_submit_button("Update")
+            delete_clicked = colu2.form_submit_button("Delete", type="primary")
+
+            if update_clicked:
                 if not all(inputs[c] for c in REQ):
                     st.error(f"Required fields: {', '.join(REQ)}")
                 else:
                     vals = tuple(none_if_blank(inputs[c]) for c in COLS)
                     update_row(table, pk_val, vals)
                     st.success("✅ Row updated.")
+
+            # Delete logic with confirmation
+            if delete_clicked:
+                st.warning("⚠️ This will permanently delete this row!")
+                confirm = st.checkbox("Yes, I want to delete this row", key=f"delete_confirm_{pk_val}")
+                if confirm:
+                    delete_row(table, pk_val)
+                    st.success("✅ Row deleted.")
+                    # Reset selection after delete
+                    st.session_state.edit_selected_pk = None
+                    st.experimental_rerun()
     else:
-        st.info("Select a row from the left to edit its details.")
+        st.info("Select a row from the left to edit or delete its details.")
