@@ -140,6 +140,12 @@ def update_row(table: str, pk_val: int, values: Tuple):
             values + (pk_val,),
         )
 
+def delete_row(table: str, pk_val: int):
+    """Delete a row by primary key value."""
+    pk = TABLES[table]["pk"]
+    with conn.cursor(buffered=True) as cur:
+        cur.execute(f"DELETE FROM {table} WHERE {pk} = %s", (pk_val,))
+
 def fetch_all(table: str) -> List[Dict]:
     with conn.cursor(buffered=True, dictionary=True) as cur:
         cur.execute(f"SELECT * FROM {table}")
